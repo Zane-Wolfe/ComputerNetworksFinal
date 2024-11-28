@@ -1,14 +1,29 @@
 ## Create the server side of the application
-
+import signal
 # import libraries
 import socket
 import threading
 import os
 import hashlib
 import shutil
+import time
+import sys
+from statistics_logger import StatisticsLogger
 
 
-# create server as class
+
+
+def format_size(size_in_bytes):
+    """Convert file size in bytes to a human-readable format."""
+    units = ['B', 'KB', 'MB', 'GB', 'TB']
+    size = size_in_bytes
+    unit_index = 0
+    while size >= 1024 and unit_index < len(units) - 1:
+        size /= 1024.0
+        unit_index += 1
+    return f"{size:.2f} {units[unit_index]}"
+
+
 class FileServer:
     # Constructor
     def __init__(self, host='0.0.0.0', port=5000):
@@ -17,6 +32,8 @@ class FileServer:
         self.server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.clients = {}  # to track active clients
         self.current_client_dir = {}
+        self.running = True
+        self.logger = StatisticsLogger()
 
     # Function to start server
     def start_server(self):
@@ -24,13 +41,37 @@ class FileServer:
         self.server_socket.listen(5)
         print(f"Server listening on {self.host}:{self.port}")
 
-        while True:
-            client_socket, client_address = self.server_socket.accept()
-            print(f"New connection from {client_address}")
-            client_thread = threading.Thread(target=self.handle_client, args=(client_socket,))
-            self.clients[client_socket] = client_thread
-            self.current_client_dir[client_socket] = "server_storage"
-            client_thread.start()
+        # Setup signal handler for graceful shutdown
+        signal.signal(signal.SIGINT, self.shutdown_server)
+
+        while self.running:
+            try:
+                # Shutdown the server
+                self.server_socket.settimeout(1)  # Avoid indefinite blocking
+                client_socket, client_address = self.server_socket.accept()
+                print(f"New connection from {client_address}")
+                client_thread = threading.Thread(target=self.handle_client, args=(client_socket,))
+                self.clients[client_socket] = client_thread
+                self.current_client_dir[client_socket] = "server_storage"
+                client_thread.start()
+            except socket.timeout:
+                continue
+        self.shutdown_server()
+
+    # Graceful shutdown method
+    def shutdown_server(self, signum=None, frame=None):
+        print("Shutting down server...")
+        self.running = False  # Stop accepting new connections
+        for client_socket in list(self.clients.keys()):  # Close active connections
+            try:
+                client_socket.close()
+            except Exception as e:
+                print(f"Error closing client connection: {e}")
+
+        self.server_socket.close()
+        self.logger.save_to_file("server_statistics.csv")  # Save logs
+        print("Server stopped gracefully. Logs saved.")
+        sys.exit(0)
 
     # Function to handle client
     def handle_client(self, client_socket):
@@ -38,16 +79,20 @@ class FileServer:
         if not authenticated:
             client_socket.close()
             return
-
         while True:
             try:
                 request = client_socket.recv(1024).decode()
                 if not request:
                     break
                 command, *args = request.split()
-                if command == "QUIT":
+                if command.lower() == "quit":
                     # Client quit
                     break
+                if command.lower() == "shutdown":
+                    self.running = False
+                    client_socket.send(b"Server Shutdown\n")
+                    break
+
                 self.process_command(client_socket, command, args)
             except Exception as e:
                 print(f"Error: {e}")
@@ -104,19 +149,45 @@ class FileServer:
                 return
         print("Ready to receive file")
         client_socket.send(b"Ready to receive file.\n")
+        response_time = 0
+        file_size = 0
+        start_time = self.logger.start_timer()
         with open(filepath, 'wb') as f:
             buffer = b""
             while True:
                 data = client_socket.recv(1024)
+                if response_time == 0:
+                    response_time = time.time() - start_time
                 if b"EOF" in data:
                     buffer += data.split(b"EOF")[0]  # Write everything before "EOF"
                     f.write(buffer)
                     break
                 buffer += data
                 f.write(buffer)
+                file_size += len(data)
                 buffer = b""  # Reset buffer after writing to the file
         print("File uploaded")
-        client_socket.send(b"File uploaded successfully.\n")
+
+        # End timer and calculate response time
+        end_time = time.time()
+        elapsed_time = end_time - start_time
+
+        # Format file_size
+        formatted_size = format_size(file_size)
+
+        # Format the response string
+        response_message = f"File uploaded of size {formatted_size} successfully in {elapsed_time:.3f} seconds!\n"
+        client_socket.send(response_message.encode())
+
+        # Log the upload operation
+        self.logger.end_timer(
+            start_time=start_time,
+            operation="UPLOAD",
+            filename=filename,
+            file_size=file_size,
+            elapsed_time=elapsed_time,
+            response_time=response_time
+        )
 
     # Function to download file
     def download_file(self, client_socket, filename):
@@ -127,10 +198,27 @@ class FileServer:
             client_socket.send(b"File not found.\n")
             return
 
+        file_size = os.path.getsize(filepath)
+        start_time = self.logger.start_timer()
+
         client_socket.send(b"Ready to send file.")
         with open(filepath, 'rb') as f:
             while chunk := f.read(1024):
                 client_socket.send(chunk)
+
+        end_time = time.time()
+        elapsed_time = end_time - start_time
+
+        # Log the operation
+        self.logger.end_timer(
+            start_time=start_time,
+            operation="DOWNLOAD",
+            filename=filename,
+            file_size=file_size,
+            elapsed_time=elapsed_time,
+            response_time=elapsed_time
+        )
+
         client_socket.send(b"EOF")
         client_socket.send(b"File downloaded successfully.\n")
 
@@ -145,6 +233,7 @@ class FileServer:
 
         os.remove(filepath)
         client_socket.send(b"File deleted successfully.\n")
+
 
     # Function to list files
     def list_files(self, client_socket):
@@ -190,5 +279,5 @@ class FileServer:
 
 # Driver code
 if __name__ == "__main__":
-    file_server = FileServer(host='127.0.0.1', port=4455)
+    file_server = FileServer(host='127.0.0.1', port=4456)
     file_server.start_server()

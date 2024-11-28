@@ -50,7 +50,7 @@ class FileClient:
         """Loop for sending commands to the server."""
         while True:
             try:
-                command = input("Enter command (UPLOAD {file}, DOWNLOAD {file}, DELETE {file}, SUBFOLDER {create|delete} {path}, DIR, CD {..|path}, QUIT):\n").strip()
+                command = input("Enter command (UPLOAD {file}, DOWNLOAD {file}, DELETE {file}, SUBFOLDER {create|delete} {path}, DIR, CD {..|path}, QUIT, SHUTDOWN):\n").strip()
                 command_select = command.split()[0].upper()
                 if command_select == "QUIT":
                     self.client_socket.send(b"QUIT")
@@ -73,6 +73,10 @@ class FileClient:
                 elif command_select.startswith("CD"):
                     _, path = command.split()
                     self.change_directory(path)
+                elif command_select.startswith("SHUTDOWN"):
+                    self.client_socket.send(b"SHUTDOWN")
+                    print("Shutting down server.")
+                    break
                 else:
                     print("Invalid command.")
             except Exception as e:
@@ -192,11 +196,15 @@ class FileClient:
         response = self.client_socket.recv(1024).decode()
         print(response)
 
+    def shutdown_server(self):
+
+        pass
+
 
 if __name__ == "__main__":
     # server_ip = input("Enter the server IP: ")
     # port = int(input("Enter the server port: "))
     server_ip = '127.0.0.1'
-    port = 4455
+    port = 4456
     client = FileClient(server_ip, port)
     client.connect()
