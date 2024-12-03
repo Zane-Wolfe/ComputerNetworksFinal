@@ -125,12 +125,14 @@ class FileClient:
                     data = self.client_socket.recv(1024)
                     if b"EOF" in data:
                         buffer += data.split(b"EOF")[0]  # Write everything before "EOF"
+                        # res = data.split(b"EOF")[1].decode()
                         f.write(buffer)
                         break
                     buffer += data
                     f.write(buffer)
                     buffer = b""  # Reset buffer after writing to the file
-            print("File downloaded\n")
+            response = self.client_socket.recv(1024).decode()
+            print(response)
         else:
             print("File not found!\n")
 
@@ -196,15 +198,12 @@ class FileClient:
         response = self.client_socket.recv(1024).decode()
         print(response)
 
-    def shutdown_server(self):
-
-        pass
-
 
 if __name__ == "__main__":
     # server_ip = input("Enter the server IP: ")
     # port = int(input("Enter the server port: "))
     server_ip = '127.0.0.1'
+    # server_ip = '192.168.123.202'
     port = 4456
     client = FileClient(server_ip, port)
     client.connect()

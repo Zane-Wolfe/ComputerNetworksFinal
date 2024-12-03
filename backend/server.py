@@ -220,7 +220,12 @@ class FileServer:
         )
 
         client_socket.send(b"EOF")
-        client_socket.send(b"File downloaded successfully.\n")
+        # Format the response string
+        # Format file_size
+        time.sleep(0.5)
+        formatted_size = format_size(file_size)
+        response_message = f"File uploaded of size {formatted_size} successfully in {elapsed_time:.3f} seconds!\n"
+        client_socket.send(response_message.encode())
 
     # Function to delete file
     def delete_file(self, client_socket, filename):
@@ -279,5 +284,7 @@ class FileServer:
 
 # Driver code
 if __name__ == "__main__":
-    file_server = FileServer(host='127.0.0.1', port=4456)
+    server_ip = '127.0.0.1'
+    # server_ip = '192.168.123.202'
+    file_server = FileServer(host=server_ip, port=4456)
     file_server.start_server()
